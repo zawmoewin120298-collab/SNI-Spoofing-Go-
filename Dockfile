@@ -1,0 +1,33 @@
+# Stage 1: Build the Go application
+FROM golang:1.21-alpine AS builder
+
+WORKDIR /app
+
+# Dependency များ ဒေါင်းလုဒ်ဆွဲရန်
+COPY go.mod ./
+RUN go mod download
+
+# Source code အားလုံးကို container ထဲ ကူးထည့်ရန်
+COPY . .
+
+# Go binary အဖြစ် build ဆောက်ရန်
+RUN CGO_ENABLED=0 GOOS=linux go build -o sni-spoof-proxy .
+
+# Stage 2: Run the application
+FROM alpine:latest
+RUN apk --no-cache add ca-certificates
+
+WORKDIR /root/
+
+# Build ထွက်လာတဲ့ binary ကို အပေါ့စား image ထဲ ရွှေ့ရန်
+COPY --from=builder /app/sni-spoof-proxy .
+
+# Railway ရဲ့ default port variable ကို သတ်မှတ်ခြင်း
+ENV PORT=8080
+EXPOSE $PORT
+
+# Go script က input arguments (ဥပမာ -port သို့မဟုတ် -addr) ကို လက်ခံရင် 
+# Railway ပေးတဲ့ $PORT နဲ့ ပတ်ခိုင်းရပါမယ်။ 
+# (မှတ်ချက် - ဆရာ့ go code ထဲက port ခေါ်တဲ့ flag ပုံစံအလိုက် ဒီနေရာကို လိုအပ်သလို ပြောင်းနိုင်သည်)
+CMD ["sh", "-c", "./sni-spoof-proxy -port $PORT"]
+
