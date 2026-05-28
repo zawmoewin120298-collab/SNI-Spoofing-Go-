@@ -1,29 +1,23 @@
-FROM golang:1.21-alpine AS builder
+# syntax=docker/dockerfile:1
 
-WORKDIR /app
+FROM --platform=$BUILDPLATFORM golang:1.25 AS build
+WORKDIR /src
 
-# Source code အားလုံးကို အရင်ယူမည်
+COPY go.mod go.sum ./
+RUN go mod download
+
 COPY . .
 
-# go.mod ဖိုင် မရှိသေးပါက အော်တိုဆောက်ခိုင်းရန်
-RUN [ -f go.mod ] || go mod init github.com/aleskxyz/SNI-Spoofing-Go
+ARG TARGETOS
+ARG TARGETARCH
+ENV CGO_ENABLED=0
 
-# Folder အဆင့်ဆင့်ထဲမှာ ရှိနေတဲ့ Go files တွေကို လိုက်ရှာပြီး dependencies ညှိပေးရန်
-RUN go mod tidy
+RUN GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /out/sni-spoofing .
 
-# အဓိကအသက် - မည်သည့် folder ထဲမှာပဲ Go code ရှိရှိ လိုက်ရှာပြီး အောင်မြင်အောင် build ဆောက်မည့်စနစ်
-RUN GOOS=linux CGO_ENABLED=0 go build -o sni-spoof-proxy $(find . -name "*.go" -not -path "*/.*" | head -n 1 | xargs dirname) || GOOS=linux CGO_ENABLED=0 go build -o sni-spoof-proxy .
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates iptables && rm -rf /var/lib/apt/lists/*
 
-# Stage 2: lightweight image ဖြင့် အပေါ့ပါးဆုံး မောင်းနှင်ရန်
-FROM alpine:latest
-RUN apk --no-cache add ca-certificates
+COPY --from=build /out/sni-spoofing /usr/local/bin/sni-spoofing
 
-WORKDIR /root/
-COPY --from=builder /app/sni-spoof-proxy .
+ENTRYPOINT ["/usr/local/bin/sni-spoofing"]
 
-# Railway အတွက် Port သတ်မှတ်ချက်
-ENV PORT=8080
-EXPOSE $PORT
-
-# Proxy ကို Railway ရဲ့ $PORT ခံပြီး မောင်းနှင်မည့် Command
-CMD ["sh", "-c", "./sni-spoof-proxy -port $PORT"]
