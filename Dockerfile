@@ -1,23 +1,28 @@
-FROM golang:1.21-alpine
+FROM golang:1.21-alpine AS builder
 
 WORKDIR /app
 
-# Source code အားလုံးကို ယူမည်
+# Source code အားလုံးကို အရင်ယူမည်
 COPY . .
 
-# go.mod မရှိသေးလျှင် အော်တိုဆောက်ခိုင်းရန်
-RUN [ -f go.mod ] || go mod init sni-spoofing-go
-
-# Dependency များကို သန့်စင်ရန်
+# go.mod ဖိုင် မရှိသေးပါက အော်တိုဆောက်ခိုင်းရန်
+RUN [ -f go.mod ] || go mod init github.com/aleskxyz/SNI-Spoofing-Go
 RUN go mod tidy
 
-# Root folder သို့မဟုတ် subfolder ထဲက .go ဖိုင်တွေကို ရှာပြီး build ဆောက်မည့်ပုံစံ
-RUN CGO_ENABLED=0 GOOS=linux go build -o sni-spoof-proxy $(find . -name "*.go" -maxdepth 2 | head -n 1 | xargs dirname) || CGO_ENABLED=0 GOOS=linux go build -o sni-spoof-proxy .
+# အဓိကအသက် - လက်ရှိ package အောက်က files တွေကို binary အဖြစ် တိုက်ရိုက်စုစည်းဆောက်ခြင်း
+RUN CGO_ENABLED=0 GOOS=linux go build -o sni-spoof-proxy .
+
+# Stage 2: lightweight image ဖြင့် မောင်းနှင်ရန်
+FROM alpine:latest
+RUN apk --no-cache add ca-certificates
+
+WORKDIR /root/
+COPY --from=builder /app/sni-spoof-proxy .
 
 # Railway အတွက် Port သတ်မှတ်ချက်
 ENV PORT=8080
 EXPOSE $PORT
 
-# ပရိုဂရမ်ကို $PORT ခံပြီး မောင်းနှင်မည်
+# Proxy ကို မောင်းနှင်မည့် Command အမှန် 
+# (-port key နေရာတွင် Railway ပေးသော dynamic $PORT ကို ထည့်သွင်းခြင်း)
 CMD ["sh", "-c", "./sni-spoof-proxy -port $PORT"]
-
